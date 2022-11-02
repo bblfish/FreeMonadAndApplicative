@@ -3,19 +3,18 @@
 // adapted to scala3 from original
 //> using scala "3.2.0"
 //> using option "-Ykind-projector"
-// run with
-// scala-cli run --jvm 17 FreeWithFreeAp.scala
 
 import $ivy.`org.scalaz::scalaz-core:7.2.34`
 import $ivy.`org.scalaz::scalaz-effect:7.2.34`
 import $ivy.`org.scalaz::scalaz-iteratee:7.2.34`
 import $ivy.`org.scalaz::scalaz-concurrent:7.2.34`
-
 import scalaz.{-\/, Applicative, Coproduct, Free, FreeAp, Inject, Monad, NaturalTransformation, Nondeterminism, \/-, ~>}
+
 import scala.language.reflectiveCalls
 import scalaz.concurrent.Task
-import Task._
-import scala.util.Random
+import Task.*
+
+import scala.util.{Random, Try}
 
 case class User(name: String, age: Int)
 
@@ -49,7 +48,7 @@ object AnalyticsRepo:
 object ProgramHelpers:
    // type Program[F[_], A] = Free[FreeAp[F, ?], A]  //<- old version
    // type Program[F[_], A] = Free[[x] =>> FreeAp[F, x], A] //<-- scala 3 version
-   type Program[F[_], A] = Free[FreeAp[F, *], A] //<- with  -Ykind-projector
+   type Program[F[_], A] = Free[FreeAp[F, *], A] //<- * works with  -Ykind-projector
    
    implicit class RichFree[F[_], A](free: Free[F, A]):
       def asProgramStep: Program[F, A] =
@@ -70,10 +69,9 @@ end ProgramHelpers
 object InterpreterHelpers:
    type ProgramInstructions[A] = Coproduct[UserOperation, AnalyticsOperation, A]
    
-   case class ParallelInterpreter[G[_]](
+   case class ParallelInterpreter[G[_]: Applicative](
     f: ProgramInstructions ~> G
-   )(using ev: Applicative[G])
-    extends (FreeAp[ProgramInstructions, *] ~> G):
+   ) extends (FreeAp[ProgramInstructions, *] ~> G):
       override def apply[A](fa: FreeAp[ProgramInstructions, A]): G[A] = fa.foldMap(f)
    
    def combineInterpreters[F[_], G[_], H[_]](f: F ~> H, g: G ~> H): Coproduct[F, G, *] ~> H =
@@ -88,12 +86,13 @@ object InterpreterHelpers:
       
 end InterpreterHelpers
 
+var sleepFor = 5000
 object SlowUserInterpreter extends (UserOperation ~> Task) {
    override def apply[A](fa: UserOperation[A]): Task[A] = fa match {
       case CreateUser(name, age) =>
          Task {
             println(s"Creating user $name")
-            Thread.sleep(5000)
+            Thread.sleep(sleepFor)
             println(s"Finished creating user $name")
             User(name, age)
          }
@@ -106,7 +105,7 @@ object SlowAnalyticsInterpreter extends (AnalyticsOperation ~> Task):
       case AnalyseUser(user) =>
          Task {
             println(s"Analysing user $user")
-            Thread.sleep(2000)
+            Thread.sleep(sleepFor)
             println(s"Finished analysing user $user")
             Random.nextInt(50)
          }
@@ -138,7 +137,8 @@ def program2[F[_]](
    import scalaz.syntax.applicative._
    import ProgramHelpers._
    for {
-      users <- (userRepo.createUser("steve", 23).par |@| userRepo.createUser("harriet", 33).par)((u1, u2) => (u1, u2)).asProgramStep
+      users <- (userRepo.createUser("steve", 23).par |@|
+               userRepo.createUser("harriet", 33).par)((u1, u2) => (u1, u2)).asProgramStep
       (user1, user2) = users
       sumOfAnalytics <- (analyticsRepo.analyseUser(user1).par |@| analyticsRepo.analyseUser(user2).par)((a, b) => a + b).asProgramStep
    } yield sumOfAnalytics
@@ -159,8 +159,16 @@ import InterpreterHelpers._
 
 val programInterpreter: ProgramInstructions ~> Task = SlowUserInterpreter or SlowAnalyticsInterpreter
 
+// run with
+// scala-cli run --jvm 17 FreeApWithScalaz.scala -- 1
 @main
-def run =
+def run(args: String*): Unit =
+  import scala.util.CommandLineParser.FromString
+  
+  for str <- args.headOption
+      i <- summon[FromString[Float]].fromStringOption(str)
+  yield sleepFor = (i * 1000).toInt
+
   println("run sequential program:")
   program[ProgramInstructions]
     .foldMap(ParallelInterpreter(programInterpreter)(using parallelTaskApplicative))
@@ -176,6 +184,7 @@ def run =
 
   println()
   println("run parallel program:")
+
   program2[ProgramInstructions]
     .foldMap(ParallelInterpreter(programInterpreter)(using parallelTaskApplicative))
     .unsafePerformSync
