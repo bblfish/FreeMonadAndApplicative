@@ -35,14 +35,14 @@ case class UserRepo[F[_]]()(using ev: Inject[UserOperation, F]):
       ExecStrategy[F, User](ev.inj(CreateUser(name, age)))
 
 object UserRepo:
-   given [F[_]](using Inject[UserOperation, F]): UserRepo[F] = UserRepo[F]()
+   given[F[_]](using Inject[UserOperation, F]): UserRepo[F] = UserRepo[F]()
 
 case class AnalyticsRepo[F[_]]()(using ev: Inject[AnalyticsOperation, F]):
    def analyseUser(user: User): ExecStrategy[F, Int] =
       ExecStrategy[F, Int](ev.inj(AnalyseUser(user)))
 
 object AnalyticsRepo:
-   given [F[_]](using Inject[AnalyticsOperation, F]): AnalyticsRepo[F] =
+   given[F[_]](using Inject[AnalyticsOperation, F]): AnalyticsRepo[F] =
       AnalyticsRepo[F]()
 
 object ProgramHelpers:
@@ -53,8 +53,9 @@ object ProgramHelpers:
    implicit class RichFree[F[_], A](free: Free[F, A]):
       def asProgramStep: Program[F, A] =
          given Monad[Program[F, *]] = Free.freeMonad[FreeAp[F, *]]
+         
          free.foldMap[ProgramHelpers.Program[F, *]](
-            new NaturalTransformation[F, ProgramHelpers.Program[F, *]]:
+            new NaturalTransformation[F, ProgramHelpers.Program[F, *]] :
                override def apply[A](fa: F[A]): Program[F, A] = liftFA(fa)
          )
    
@@ -63,19 +64,19 @@ object ProgramHelpers:
    
    def liftFA[F[_], A](fa: F[A]): Program[F, A] =
       Free.liftF[FreeAp[F, *], A](FreeAp.lift(fa))
-      
+
 end ProgramHelpers
 
 object InterpreterHelpers:
    type ProgramInstructions[A] = Coproduct[UserOperation, AnalyticsOperation, A]
    
-   case class ParallelInterpreter[G[_]: Applicative](
+   case class ParallelInterpreter[G[_] : Applicative](
     f: ProgramInstructions ~> G
-   ) extends (FreeAp[ProgramInstructions, *] ~> G):
+   ) extends (FreeAp[ProgramInstructions, *] ~> G) :
       override def apply[A](fa: FreeAp[ProgramInstructions, A]): G[A] = fa.foldMap(f)
    
    def combineInterpreters[F[_], G[_], H[_]](f: F ~> H, g: G ~> H): Coproduct[F, G, *] ~> H =
-      new (Coproduct[F, G, *] ~> H):
+      new(Coproduct[F, G, *] ~> H) :
          override def apply[A](fa: Coproduct[F, G, A]): H[A] = fa.run match {
             case -\/(ff) => f(ff)
             case \/-(gg) => g(gg)
@@ -83,10 +84,11 @@ object InterpreterHelpers:
    
    implicit class RichNaturalTransformation[F[_], H[_]](val f: F ~> H):
       def or[G[_]](g: G ~> H): Coproduct[F, G, *] ~> H = combineInterpreters[F, G, H](f, g)
-      
+
 end InterpreterHelpers
 
 var sleepFor = 5000
+
 object SlowUserInterpreter extends (UserOperation ~> Task) {
    override def apply[A](fa: UserOperation[A]): Task[A] = fa match {
       case CreateUser(name, age) =>
@@ -99,22 +101,23 @@ object SlowUserInterpreter extends (UserOperation ~> Task) {
    }
 }
 
-object SlowAnalyticsInterpreter extends (AnalyticsOperation ~> Task):
+object SlowAnalyticsInterpreter extends (AnalyticsOperation ~> Task) :
    override def apply[A](fa: AnalyticsOperation[A]): Task[A] =
       fa match
-      case AnalyseUser(user) =>
-         Task {
-            println(s"Analysing user $user")
-            Thread.sleep(sleepFor)
-            println(s"Finished analysing user $user")
-            Random.nextInt(50)
-         }
+         case AnalyseUser(user) =>
+            Task {
+               println(s"Analysing user $user")
+               Thread.sleep(sleepFor)
+               println(s"Finished analysing user $user")
+               Random.nextInt(50)
+            }
 
 // Runs 3 steps
 // Step 1 - Create user Steve
 // Step 2 - Create user Harriet
 // Step 3 - Run analytics on steve and harriet in parallel
-def program[F[_]](using
+def program[F[_]](
+ using
  userRepo: UserRepo[F],
  analyticsRepo: AnalyticsRepo[F]
 ): ProgramHelpers.Program[F, Int] =
@@ -123,7 +126,9 @@ def program[F[_]](using
    for {
       user1 <- userRepo.createUser("steve", 23).seq.asProgramStep
       user2 <- userRepo.createUser("harriet", 33).seq.asProgramStep
-      sumOfAnalytics <- (analyticsRepo.analyseUser(user1).par |@| analyticsRepo.analyseUser(user2).par)((a, b) => a + b).asProgramStep
+      sumOfAnalytics <- ( analyticsRepo.analyseUser(user1).par |@|
+                          analyticsRepo.analyseUser(user2).par
+                        )((a, b) => a + b).asProgramStep
    } yield sumOfAnalytics
 
 
@@ -137,14 +142,18 @@ def program2[F[_]](
    import scalaz.syntax.applicative._
    import ProgramHelpers._
    for {
-      users <- (userRepo.createUser("steve", 23).par |@|
-               userRepo.createUser("harriet", 33).par)((u1, u2) => (u1, u2)).asProgramStep
+      users <- ( userRepo.createUser("steve", 23).par |@|
+                 userRepo.createUser("harriet", 33).par
+               )((u1, u2) => (u1, u2)).asProgramStep
       (user1, user2) = users
-      sumOfAnalytics <- (analyticsRepo.analyseUser(user1).par |@| analyticsRepo.analyseUser(user2).par)((a, b) => a + b).asProgramStep
+      sumOfAnalytics <- ( analyticsRepo.analyseUser(user1).par |@|
+                          analyticsRepo.analyseUser(user2).par
+               )((a, b) => a + b
+      ).asProgramStep
    } yield sumOfAnalytics
 }
 
-val parallelTaskApplicative = new Applicative[Task]:
+val parallelTaskApplicative = new Applicative[Task] :
    def point[A](a: => A) = Task.now(a)
    
    def ap[A, B](a: => Task[A])(f: => Task[A => B]): Task[B] = apply2(f, a)(_(_))
@@ -163,29 +172,29 @@ val programInterpreter: ProgramInstructions ~> Task = SlowUserInterpreter or Slo
 // scala-cli run --jvm 17 FreeApWithScalaz.scala -- 1
 @main
 def run(args: String*): Unit =
-  import scala.util.CommandLineParser.FromString
-  
-  for str <- args.headOption
-      i <- summon[FromString[Float]].fromStringOption(str)
-  yield sleepFor = (i * 1000).toInt
-
-  println("run sequential program:")
-  program[ProgramInstructions]
+   import scala.util.CommandLineParser.FromString
+   
+   for str <- args.headOption
+       i <- summon[FromString[Float]].fromStringOption(str)
+   yield sleepFor = (i * 1000).toInt
+   
+   println("run sequential program:")
+   program[ProgramInstructions]
     .foldMap(ParallelInterpreter(programInterpreter)(using parallelTaskApplicative))
     .unsafePerformSync
-//Creating user steve
-//Finished creating user steve
-//Creating user harriet
-//Finished creating user harriet
-//Analysing user User(harriet,33)
-//Analysing user User(steve,23)
-//Finished analysing user User(harriet,33)
-//Finished analysing user User(steve,23)
-
-  println()
-  println("run parallel program:")
-
-  program2[ProgramInstructions]
+   //Creating user steve
+   //Finished creating user steve
+   //Creating user harriet
+   //Finished creating user harriet
+   //Analysing user User(harriet,33)
+   //Analysing user User(steve,23)
+   //Finished analysing user User(harriet,33)
+   //Finished analysing user User(steve,23)
+   
+   println()
+   println("run parallel program:")
+   
+   program2[ProgramInstructions]
     .foldMap(ParallelInterpreter(programInterpreter)(using parallelTaskApplicative))
     .unsafePerformSync
 //Creating user harriet
