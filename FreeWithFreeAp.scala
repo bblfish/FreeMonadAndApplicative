@@ -1,6 +1,10 @@
-// adapted to scala3 from original https://gist.github.com/camjo/d2dd391b5a44b55d407f041477341242
+// code from "An Intuitive Guide to Combining Free Monads and Free Applicatives"
+// see links: https://twitter.com/bblfish/status/1587052879986180097
+// adapted to scala3 from original
 //> using scala "3.2.0"
 //> using option "-Ykind-projector"
+// run with
+// scala-cli run --jvm 17 FreeWithFreeAp.scala
 
 import $ivy.`org.scalaz::scalaz-core:7.2.34`
 import $ivy.`org.scalaz::scalaz-effect:7.2.34`
