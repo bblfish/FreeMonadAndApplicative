@@ -30,6 +30,8 @@ case class ExecStrategy[F[_], A](fa: F[A]):
    val seq: Free[F, A] = Free.liftF(fa)
    val par: FreeAp[F, A] = FreeAp.lift(fa)
 
+/** Note: The Inject type class comes from [[https://www.cambridge.org/core/journals/journal-of-functional-programming/article/data-types-a-la-carte/14416CB20C4637164EA9F77097909409 Datatypes a la carte]]
+ with a translation to Scala https://gist.github.com/YoEight/3010716 */
 case class UserRepo[F[_]]()(using ev: Inject[UserOperation, F]):
    def createUser(name: String, age: Int): ExecStrategy[F, User] =
       ExecStrategy[F, User](ev.inj(CreateUser(name, age)))
